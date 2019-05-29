@@ -1,0 +1,9 @@
+insert into xyz(t_id,v_id,f_name) select t_id,v_id,f_name from xyz2 where id="1";
+
+insert into user_feature_online (id,user_id, feature_path,image_url,created_at,x,y,w,h,ref_id) select id,user_id, feature_path,image_url,created_at,x,y,w,h,id from user_feature where feature_type=2;
+
+alter table user_feature_online add column user_id varchar(32) NULL default NULL;
+
+update user_feature_online,user_feature set user_feature_online.ref_id=user_feature.id where user_feature_online.user_id=user_feature.user_id and user_feature.feature_type=0;
+
+select * from user_feature_online where ref_id in (select id from user_feature) order by ref_id limit 1;
