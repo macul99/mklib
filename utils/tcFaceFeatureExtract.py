@@ -14,7 +14,7 @@ import json
 import imp
 from PIL import Image
 
-class tcFeatureExtract():
+class tcFaceFeatureExtract():
     def __init__(self, model_net, model_weight=None, model_path=None, outputs_name={'embedding':'out_embedding'}, 
                 input_shape=(112,112,3), out_dim=512, ctx='gpu', mean_value=None, mmdnn_convert=False): # mmdnn_convert is used for model convertion
         self.model_path = model_path
@@ -107,14 +107,14 @@ sys.path.append('/home/macul/libraries/mk_utils/mklib/utils/')
 from PIL import Image
 import numpy as np
 import torch
-from tcFaceFeatureExtract import tcFeatureExtract
-extractor_gpu=tcFeatureExtract(model_net='net_pytorch_gpu.py',model_weight='wt_pytorch_gpu.npy', ctx='gpu')
-extractor_cpu=tcFeatureExtract(model_net='net_pytorch_cpu.py',model_weight='wt_pytorch_cpu.npy', ctx='cpu')
+from tcFaceFeatureExtract import tcFaceFeatureExtract
+extractor_gpu=tcFaceFeatureExtract(model_net='net_pytorch_gpu.py',model_weight='wt_pytorch_gpu.npy', ctx='gpu')
+extractor_cpu=tcFaceFeatureExtract(model_net='net_pytorch_cpu.py',model_weight='wt_pytorch_cpu.npy', ctx='cpu')
 emb_gpu=extractor_gpu.getEmbedding('seagull112.jpg')
 emb_cpu=extractor_cpu.getEmbedding('seagull112.jpg')
 
-extractor_gpu1=tcFeatureExtract(model_net='net_pytorch_gpu.py',model_path='pytorch_gpu.pth', ctx='gpu')
-extractor_cpu1=tcFeatureExtract(model_net='net_pytorch_cpu.py',model_path='pytorch_cpu.pth', ctx='cpu')
+extractor_gpu1=tcFaceFeatureExtract(model_net='net_pytorch_gpu.py',model_path='pytorch_gpu.pth', ctx='gpu')
+extractor_cpu1=tcFaceFeatureExtract(model_net='net_pytorch_cpu.py',model_path='pytorch_cpu.pth', ctx='cpu')
 emb_gpu1=extractor_gpu1.getEmbedding('seagull112.jpg')
 emb_cpu1=extractor_cpu1.getEmbedding('seagull112.jpg')
 '''

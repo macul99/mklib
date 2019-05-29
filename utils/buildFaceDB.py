@@ -1,6 +1,6 @@
 from __future__ import print_function
 import sys
-sys.path.append('/home/macul/libraries/mk_utils/mklib/utils/')
+#sys.path.append('/home/macul/libraries/mk_utils/mklib/utils/')
 import mysql.connector # sudo pip install mysql-connector-python
 # conda install -c anaconda mysql-connector-python
 from mysql.connector import errorcode
@@ -80,6 +80,29 @@ class buildFaceDB():
 
 
 '''
+import sys
+import pickle
+from buildFaceDB import buildFaceDB
+from mxFaceFeatureExtract import mxFaceFeatureExtract
+buildDB = buildFaceDB()
+extractor=mxFaceFeatureExtract('/media/macul/black/mxnet_training/mobilefacenet/server_train3','train_3',34, outputs_name={'embedding':'embedding_output'},mean_value='/media/macul/black/face_database_raw_data/mscelb_from_insightface/mean.json',out_dim=128)
+buildDB.get_embedding_to_txt(extractor.getEmbedding, dir_path='/media/macul/black/face_database_raw_data/template_ali_112x112',dst_dir='/media/macul/black/face_database_raw_data/template_ali_112x112_mf_server_train3_34')
+
+import sys
+import pickle
+from buildFaceDB import buildFaceDB
+from mxFaceFeatureExtract import mxFaceFeatureExtract
+buildDB = buildFaceDB()
+extractor=mxFaceFeatureExtract('/media/macul/black/mxnet_training/mobilefacenet/server_train2','train_2',63, outputs_name={'embedding':'embedding_output'},mean_value='/media/macul/black/face_database_raw_data/mscelb_from_insightface/mean.json',out_dim=128)
+buildDB.get_embedding_to_txt(extractor.getEmbedding, dir_path='/media/macul/black/face_database_raw_data/template_ali_112x112',dst_dir='/media/macul/black/face_database_raw_data/template_ali_112x112_mf_server_train2_63')
+
+import sys
+import pickle
+from buildFaceDB import buildFaceDB
+from mxFaceFeatureExtract import mxFaceFeatureExtract
+buildDB = buildFaceDB()
+extractor=mxFaceFeatureExtract('/media/macul/black/mxnet_training/mobilefacenet/dgx_train2','train_2',32, outputs_name={'embedding':'embedding_output'},mean_value='/media/macul/black/face_database_raw_data/mscelb_from_insightface/mean.json',out_dim=128)
+buildDB.get_embedding_to_txt(extractor.getEmbedding, dir_path='/media/macul/black/face_database_raw_data/template_ali_112x112',dst_dir='/media/macul/black/face_database_raw_data/template_ali_112x112_mf_dgx_train2_32')
 
 import sys
 import pickle
