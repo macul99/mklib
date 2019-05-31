@@ -153,6 +153,7 @@ class ResnetBlock_V3(nn.Module):
         return out
 
 class PthResNet(nn.Module):
+    # this class gives interface for landmarkloss
     # for resnet: stages=(3,4,6,3), filters=(64,256,512,1024,2048)
     # in_c: input image channel number, in_s: input image size (square input)
     def __init__(self, in_c, in_s, emb_size, stages, filters, res_ver='v3', in_ver='v2', bnEps=2e-5, bnMom=0.9, bottle_neck=False):
@@ -214,3 +215,66 @@ class PthResNet(nn.Module):
         act2_1 = self.model(x)
         embedding = self.model1(act2_1)
         return embedding, act2_1
+
+
+class PthResNetSimple(nn.Module):
+    # this class gives no interface for landmarkloss
+    # for resnet: stages=(3,4,6,3), filters=(64,256,512,1024,2048)
+    # in_c: input image channel number, in_s: input image size (square input)
+    def __init__(self, in_c, in_s, emb_size, stages, filters, res_ver='v3', in_ver='v2', bnEps=2e-5, bnMom=0.9, bottle_neck=False):
+        assert res_ver in ['v2','v3'], 'only residuel module version 2 and 3 are supported!!'
+        assert in_ver in ['v1','v2'], 'only input version 1 and 2 are supported!!'
+        assert len(stages)+1==len(filters)
+        super(PthResNetSimple, self).__init__()
+        self.in_c = in_c
+        self.in_s = in_s
+        self.emb_size = emb_size
+        self.stages = stages
+        self.filters = filters
+        self.bnEps = bnEps
+        self.bnMom = bnMom
+        self.bottle_neck = bottle_neck
+        if res_ver=='v2':
+            residual_module = ResnetBlock_V2
+        elif res_ver=='v3':
+            residual_module = ResnetBlock_V3
+        stride = 2
+        final_out_size = int(in_s/(2**len(self.stages)))
+        # data input
+        #data = mx.sym.Variable("data")
+
+        # Block #1: BN => CONV => ACT => POOL, then initialize the "body" of the network
+        #bn1_1 = mx.sym.BatchNorm(data=data, fix_gamma=True, eps=bnEps, momentum=bnMom, name='stem_bn1')
+        self.model = []
+        if in_ver=='v1':
+            self.model += [nn.Conv2d(self.in_c, self.filters[0], kernel_size=7, stride=2, padding=3, bias=False)]
+        elif in_ver=='v2':
+            self.model += [nn.Conv2d(self.in_c, self.filters[0], kernel_size=3, stride=1, padding=1, bias=False)]
+        self.model += [ nn.BatchNorm2d(self.filters[0], eps=self.bnEps, momentum=self.bnMom, affine=True),
+                        nn.PReLU(num_parameters=self.filters[0]) ]        
+
+        # loop over the number of stages
+        
+        for i in range(0, len(stages)):
+            self.model += [residual_module(self.filters[i], self.filters[i+1], stride, act_type='prelu', red=True, bnEps=self.bnEps, bnMom=self.bnMom, bottle_neck=self.bottle_neck)]
+            # initialize the stride, then apply a residual module used to reduce the spatial size of the input volume            
+
+            # loop over the number of layers in the stage
+            for j in range(0, stages[i] - 1):
+                self.model += [residual_module(self.filters[i+1], self.filters[i+1], 1, act_type='prelu', red=False, bnEps=self.bnEps, bnMom=self.bnMom, bottle_neck=self.bottle_neck)]
+                # apply a ResNet module
+
+        self.model += [ nn.BatchNorm2d(self.filters[-1], eps=self.bnEps, momentum=self.bnMom, affine=True),
+                        nn.PReLU(self.filters[-1]),
+                        nn.Conv2d(self.filters[-1], self.filters[-1], kernel_size=3, stride=1, padding=1, bias=False),
+                        nn.BatchNorm2d(self.filters[-1], eps=self.bnEps, momentum=self.bnMom, affine=True),
+                        nn.ReLU(),
+                        Flatten(),
+                        nn.Linear(self.filters[-1]*final_out_size*final_out_size, self.emb_size, bias=True),
+                        nn.BatchNorm1d(self.emb_size, eps=self.bnEps, momentum=self.bnMom, affine=True)]
+        self.model = nn.Sequential(*self.model)
+
+    def forward(self, x):
+        """Forward function (with skip connections)"""
+        embedding = self.model(x)
+        return embedding
