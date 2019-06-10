@@ -28,7 +28,7 @@ args.add_argument("-rst", "--result", required=True, help="path to result pickle
 def rename_subfolder(src):
     fdl = listdir(src)
     for i, fd in enumerate(fdl):
-        os.rename(join(src,fd),join(src,str(i)))
+        os.rename(join(src,fd),join(src,'{0:10d}'.format(i)))
 
 def extract_feature(extractor, src, save_path=None):
     df = pd.DataFrame(columns=['person_name', 'img_name', 'feature'])
@@ -100,6 +100,7 @@ def label_folder(test_path, reg_path, df_in, th_l=0.75, th_h=0.8, save_interval=
             print('Saving data...')
             pickle.dump(df_out, f_w, protocol=pickle.HIGHEST_PROTOCOL)
         df = df_in[df_in['person_name']==fd]
+        print(fd, df['reg_name_top_n'])
         reg_names = list(df['reg_name_top_n'].values[0])
         top_scores = list(df['score_top_n'].values[0])
         if top_scores[0]<th_l:
@@ -136,6 +137,41 @@ def label_folder(test_path, reg_path, df_in, th_l=0.75, th_h=0.8, save_interval=
     if save_path is not None:
         pickle.dump(df_out, f_w, protocol=pickle.HIGHEST_PROTOCOL)      
     return df_out
+
+def label_folder_update(test_path, reg_path, df_in, df_label, th_l=0.7, th_h=0.75, save_path=None):
+    total_num = len(df_label)
+    top_n = df_in.loc[0]['reg_img_top_n'].shape[0]
+    for i, fd in enumerate(df_label['person_name'].values):        
+        df = df_in[df_in['person_name']==fd]
+        reg_names = list(df['reg_name_top_n'].values[0])
+        top_scores = list(df['score_top_n'].values[0])
+        if top_scores[0]<th_l or top_scores[0]>=th_h:
+            continue
+        print('{}/{}'.format(i,total_num), reg_names)
+        img_r = []
+        img_t = []
+        img_s = []
+        for j, (rn, r, t) in enumerate(zip(reg_names, list(df['reg_img_top_n'].values[0]), list(df['test_img_top_n'].values[0]))):
+            #print(join(reg_path,fd,r))
+            #print(join(test_path,fd,t))
+            img_r += [cv2.putText(cv2.imread(join(reg_path,rn,r)),str(j),(5,20), cv2.FONT_HERSHEY_SIMPLEX, 0.7,(0,255,0),3)]
+            img_t += [cv2.imread(join(test_path,fd,t))]
+            img_s += [cv2.putText(np.ones([112,112,3]).astype(np.uint8)*255,str(top_scores[j]),(5,65), cv2.FONT_HERSHEY_SIMPLEX, 0.7,(0,0,0),3)]
+        #print([tmp.shape for tmp in img_r])
+        #print([tmp.shape for tmp in img_t])
+        img_r = np.vstack(img_r)
+        img_t = np.vstack(img_t)
+        img_s = np.vstack(img_s)
+        img_final = np.hstack((img_r, img_t, img_s))
+        cv2.imshow('Main', img_final)
+        key = cv2.waitKey() & 0xFF - ord('0')
+        if key>=0 and key<top_n:
+            print(reg_names[key])
+            df_label.loc[i]['true_label'] = reg_names[key]
+    cv2.destroyAllWindows()
+    if save_path is not None:
+        pickle.dump(df_label, open(abspath(save_path), 'wb'), protocol=pickle.HIGHEST_PROTOCOL)      
+    return df_label
 
 # df_ft_reg     : df contains all the feature of register images, output of extract_feature()
 # df_label_test : df specify the true label of test images, output of label_folder()
@@ -323,7 +359,7 @@ df_label=label_folder('./iim_dataset_test_112x112', './dataset', df_rank, save_p
 ## evaluate model
 import sys
 import pickle
-sys.path.append('/home/macul/Documents/macul')
+#sys.path.append('/home/macul/Documents/macul')
 sys.path.append('/home/macul/Documents/macul/mklib/utils')
 from mxFaceFeatureExtract import mxFaceFeatureExtract
 from modelBenchMarking import *
@@ -343,4 +379,34 @@ df_rank=pickle.load(open('./rank_df.pkl','rb'))
 dic_clean=clean_reg(df_rank, './regis_112x112', th=0.75, save_path='./clean_dict_itr1.pkl')
 #dic_clean=pickle.load(open('./clean_dict_itr1.pkl','rb'))
 combine_reg_folder(dic_clean,'./regis_112x112','./itr1')
+
+
+
+
+df_test=extract_feature(extractor.getEmbedding, './iim_dataset_test_112x112_ext', './test_ext_df.pkl')
+df_rank=rank_folder(df_reg,df_test,save_path='./rank_ext_df.pkl')
+df_label=label_folder('./iim_dataset_test_112x112_ext', './dataset', df_rank, save_path='./label_ext_df.pkl')
+
+rt = './iim_dataset_test_112x112'
+new_name = []
+for i, nm in enumerate(df_label_all['person_name'].values):
+    nnm = '{0:08}'.format(i)
+    os.rename(join(rt,nm),join(rt,nnm))
+    new_name.append(nnm)
+
+
+df_label=pickle.load(open('./label_all_df.pkl','rb'))
+df_label1=label_folder_update('./iim_dataset_test_112x112_all', './dataset', df_rank, df_label, th_l=0.7, th_h=0.75, save_path='./label_all_df1.pkl')
+
+
+import sys
+import pickle
+#sys.path.append('/home/macul/Documents/macul')
+sys.path.append('/home/macul/Documents/macul/mklib/utils')
+from mxFaceFeatureExtract import mxFaceFeatureExtract
+from modelBenchMarking import *
+df_reg = pickle.load(open('./reg_resnet50.pkl','rb'))
+df_test = pickle.load(open('./test_resnet50.pkl','rb'))
+df_label = pickle.load(open('./label_all.pkl','rb'))
+df_pred=predict_test_data(df_reg, df_label, df_test, save_path='./pred_resnet50.pkl')
 '''

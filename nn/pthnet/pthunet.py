@@ -1,3 +1,6 @@
+import torch
+from torch.nn.parameter import Parameter
+from torch.autograd import Variable
 import fastai
 from fastai import *
 from fastai.vision import *
@@ -8,8 +11,6 @@ from fastai.torch_core import *
 from fastai.core import *
 from fastai.callbacks  import hook_outputs
 from fastai.callbacks.hooks import *
-from torch.nn.parameter import Parameter
-from torch.autograd import Variable
 from . import pthutils
 from . import pthlayer
 
@@ -112,7 +113,7 @@ class DynamicUnetWide(SequentialEx):
         extra_bn =  norm_type == fastai.vision.NormType.Spectral
         imsize = (112,112)
         sfs_szs = fastai.callbacks.hooks.model_sizes(encoder, size=imsize)
-        sfs_idxs = list(reversed(pthutil.get_sfs_idxs(sfs_szs)))
+        sfs_idxs = list(reversed(pthutils.get_sfs_idxs(sfs_szs)))
         self.sfs = fastai.callbacks.hooks.hook_outputs([encoder[i] for i in sfs_idxs], detach=hook_detach)
         x = fastai.callbacks.hooks.dummy_eval(encoder, imsize).detach()
 
@@ -147,6 +148,56 @@ class DynamicUnetWide(SequentialEx):
 
     def __del__(self):
         if hasattr(self, "sfs"): self.sfs.remove()
+
+
+class UnetWideModel(nn.Module):
+    def __init__(self, opt):
+        super().__init__()
+        preModel = torch.load(opt.pretrainModel)
+        preModel = list(preModel.children())[0]
+        encoder = pthutils.cut_model(preModel,opt.ftExtractorCutNum)
+        self.model = DynamicUnetWide(   encoder, n_classes=opt.num_classes_gen, blur=opt.blur, blur_final=opt.blur_final,
+                                        self_attention=opt.self_attention, y_range=opt.y_range, norm_type=opt.norm_type_gen, 
+                                        last_cross=opt.last_cross, bottle=opt.bottle, nf_factor=opt.nf_factor, bnEps=opt.bn_eps, 
+                                        bnMom=opt.bn_mom, hook_detach=opt.hook_detach )
+
+    def forward(self, up_in:Tensor) -> Tensor:
+        return self.model(up_in)
+
+    def get_encoder(self):
+        return list(self.model.children())[0]
+
+    def freeze_encoder(self):
+        pthutils.set_requires_grad(self.get_encoder(), False)
+
+    def unfreeze_encoder(self):
+        pthutils.set_requires_grad(self.get_encoder(), True)
+
+    def freeze(self):
+        pthutils.set_requires_grad(self.model, False)
+
+    def unfreeze(self):
+        pthutils.set_requires_grad(self.model, True)
+
+
+class FeatureExtractorModel(nn.Module):
+    def __init__(self, opt):
+        super().__init__()
+        self.model = torch.load(opt.pretrainModel)
+
+        # check feature_dim
+        imsize = (112,112)
+        sfs_szs = fastai.callbacks.hooks.model_sizes(self.model, size=imsize)
+        assert opt.ftDim == sfs_szs[-1][1]
+
+    def forward(self, up_in:Tensor) -> Tensor:
+        return self.model(up_in)
+
+    def freeze(self):
+        pthutils.set_requires_grad(self.model, False)
+
+    def unfreeze(self):
+        pthutils.set_requires_grad(self.model, True)
 
 '''
 class FeatureLoss(nn.Module):
