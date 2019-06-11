@@ -130,4 +130,18 @@ sys.path.append('/home/macul/libraries/mk_utils/mklib/utils/')
 from caffeFeatureExtract import caffeFeatureExtract
 a=caffeFeatureExtract('/home/macul/Projects/ego_mk_op/ego/recognition/models',prototxt_name='sphereface_deploy',caffemodel_name='sphereface20_ms1m',outputs_name={'embedding':'fc5'},img_width=96)
 embedding=a.getEmbedding('/media/macul/black/face_database_raw_data/mscelb_from_insightface/Data/0000000/0000.png')
+
+import time
+import sys
+sys.path.append('/home/macul/Documents/macul/mklib/utils/')
+from caffeFaceFeatureExtract import caffeFaceFeatureExtract
+#a1=caffeFaceFeatureExtract('/home/macul/Documents/macul/FaceRecog_ResNet_MX/output/dgx_train7',prototxt_name='resnet20',caffemodel_name='resnet20',outputs_name={'embedding':'out_embedding'})
+a1=caffeFaceFeatureExtract('/home/macul/Downloads',prototxt_name='sphereface_deploy',caffemodel_name='sphereface20_ms1m',outputs_name={'embedding':'fc5'},img_width=96)
+img=a1.getImage('/media/macul/black/face_database_raw_data/mscelb_from_insightface/Data/0000000/0000.png')
+a1.Net.blobs['data'].data[...] = img
+def test_time(repeat=1000):
+    start_time = time.time()
+    for i in range(repeat):
+        a1.Net.forward()
+    print("--- %s seconds ---" % (time.time() - start_time))
 '''
