@@ -1,7 +1,9 @@
 from __future__ import print_function
 from fastai.core import *
+from fastai.torch_core import *
 import torch
-from torch import nn
+from torch import nn, Tensor
+from torch.nn.parallel import DistributedDataParallel
 from torch.optim import lr_scheduler
 import functools
 import random
@@ -449,3 +451,26 @@ def do_annealing_poly(start:Number, end:Number, pct:float, degree:Number)->Numbe
 def annealing_poly(degree:Number)->Number:
     "Anneal polynomically from `start` to `end` as pct goes from 0.0 to 1.0."
     return functools.partial(do_annealing_poly, degree=degree)
+
+# https://github.com/fastai/fastai/blob/master/fastai/vision/gan.py
+class AdaptiveLoss(nn.Module):
+    "Expand the `target` to match the `output` size before applying `crit`."
+    def __init__(self, crit):
+        super().__init__()
+        self.crit = crit
+
+    def forward(self, output, target):
+        return self.crit(output, target[:,None].expand_as(output).float())
+
+# https://github.com/fastai/fastai/blob/master/fastai/vision/gan.py
+def accuracy_thresh_expand(y_pred:Tensor, y_true:Tensor, thresh:float=0.5, sigmoid:bool=True)->Rank0Tensor:
+    "Compute accuracy after expanding `y_true` to the size of `y_pred`."
+    if sigmoid: y_pred = y_pred.sigmoid()
+    return ((y_pred>thresh)==y_true[:,None].expand_as(y_pred).byte()).float().mean()
+
+# https://github.com/fastai/fastai/blob/master/fastai/vision/image.py
+# image2np()
+def image2np(image:Tensor)->np.ndarray:
+    "Convert from torch style `image` to numpy/matplotlib style."
+    res = image.cpu().permute(1,2,0).numpy()
+    return res[...,0] if res.shape[2]==1 else res

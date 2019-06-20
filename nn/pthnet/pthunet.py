@@ -105,7 +105,7 @@ class DynamicUnetDeep(SequentialEx):
 class DynamicUnetWide(SequentialEx):
     "Create a U-Net from a given architecture."
     def __init__(self, encoder:nn.Module, n_classes:int, blur:bool=False, blur_final=True, self_attention:bool=False,
-                 y_range:Optional[Tuple[float,float]]=None, last_cross:bool=True, bottle:bool=False,
+                 y_range:Optional[Tuple[float,float]]=(-3.,3.), last_cross:bool=True, bottle:bool=False,
                  norm_type:Optional[fastai.vision.NormType]=fastai.vision.NormType.Batch, nf_factor:int=1,
                  bnEps:float=2e-5, bnMom:float=0.9, hook_detach:bool=False, **kwargs):
         
@@ -144,6 +144,7 @@ class DynamicUnetWide(SequentialEx):
             layers.append(fastai.layers.res_block(ni, bottle=bottle, norm_type=norm_type, **kwargs))
         layers += [pthlayer.custom_conv_layer(ni, n_classes, ks=1, use_activ=False, norm_type=norm_type)]
         if y_range is not None: layers.append(fastai.layers.SigmoidRange(*y_range))
+        #layers.append(nn.Tanh())
         super().__init__(*layers)
 
     def __del__(self):
@@ -153,6 +154,7 @@ class DynamicUnetWide(SequentialEx):
 class UnetWideModel(nn.Module):
     def __init__(self, opt):
         super().__init__()
+        self.opt = opt
         preModel = torch.load(opt.pretrainModel)
         preModel = list(preModel.children())[0]
         encoder = pthutils.cut_model(preModel,opt.ftExtractorCutNum)
@@ -160,6 +162,7 @@ class UnetWideModel(nn.Module):
                                         self_attention=opt.self_attention, y_range=opt.y_range, norm_type=opt.norm_type_gen, 
                                         last_cross=opt.last_cross, bottle=opt.bottle, nf_factor=opt.nf_factor, bnEps=opt.bn_eps, 
                                         bnMom=opt.bn_mom, hook_detach=opt.hook_detach )
+        #fastai.torch_core.apply_init(self.model[2], nn.init.kaiming_normal_)
 
     def forward(self, up_in:Tensor) -> Tensor:
         return self.model(up_in)
@@ -183,11 +186,12 @@ class UnetWideModel(nn.Module):
 class FeatureExtractorModel(nn.Module):
     def __init__(self, opt):
         super().__init__()
+        self.opt = opt
         self.model = torch.load(opt.pretrainModel)
 
         # check feature_dim
         imsize = (112,112)
-        sfs_szs = fastai.callbacks.hooks.model_sizes(self.model, size=imsize)
+        sfs_szs = fastai.callbacks.hooks.model_sizes(self.model.model, size=imsize)
         assert opt.ftDim == sfs_szs[-1][1]
 
     def forward(self, up_in:Tensor) -> Tensor:

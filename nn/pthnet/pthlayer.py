@@ -1,11 +1,16 @@
 import fastai
 from fastai.core import *
-from torch import nn
+from fastai.torch_core import *
+import torch
+from torch import nn, Tensor
 from collections import OrderedDict
 from abc import ABC, abstractmethod
 from . import pthutils
 import os
 
+class Flatten(nn.Module):
+    def forward(self, input):
+        return input.view(input.size(0), -1)
 
 # https://github.com/jantic/DeOldify/blob/master/fasterai/layers.py
 # custom_conv_layer()
@@ -78,11 +83,10 @@ class BaseModel(ABC):
         self.gpu_ids = opt.gpu_ids
         self.isTrain = opt.isTrain
         self.device = torch.device('cuda:{}'.format(self.gpu_ids[0])) if self.gpu_ids else torch.device('cpu')  # get device name: CPU or GPU
-        self.save_dir = os.path.join(opt.checkpoints_dir, opt.name)  # save all the checkpoints to save_dir
-        if opt.preprocess != 'scale_width':  # with [scale_width], input images might have different sizes, which hurts the performance of cudnn.benchmark.
-            torch.backends.cudnn.benchmark = True
+        self.save_dir = os.path.join(opt.checkpoints_dir, opt.name)  # save all the checkpoints to save_dir        
         self.loss_names = []
         self.model_names = []
+        self.model_names_for_save = []
         self.visual_names = []
         self.optimizers = []
         self.image_paths = []
@@ -116,6 +120,24 @@ class BaseModel(ABC):
     def optimize_parameters(self):
         """Calculate losses, gradients, and update network weights; called in every training iteration"""
         pass
+
+    # https://github.com/fastai/fastai/blob/master/fastai/basic_train.py
+    def lr_range(self, lr:Union[float,slice], layer_groups)->np.ndarray:
+        "Build differential learning rates from `lr`."
+        if not isinstance(lr,slice): return lr
+        if lr.start: res = even_mults(lr.start, lr.stop, len(layer_groups))
+        else: res = [lr.stop/10]*(len(layer_groups)-1) + [lr.stop]
+        return np.array(res)
+
+    # https://github.com/fastai/fastai/blob/master/fastai/basic_train.py
+    def split(self, model, split_on):
+        if callable(split_on): split_on = split_on(model)
+        return fastai.torch_core.split_model(model, split_on)
+
+    # https://github.com/fastai/fastai/blob/master/fastai/basic_train.py
+    def create_opt(self, opt, layer_groups):
+        lr = self.lr_range(opt.lr, layer_groups)
+        return fastai.callback.OptimWrapper.create(opt.opt_func, lr, layer_groups, wd=opt.wd, true_wd=opt.true_wd, bn_wd=opt.bn_wd)
 
     def setup(self, opt):
         """Load and print networks; create schedulers
@@ -185,14 +207,14 @@ class BaseModel(ABC):
         Parameters:
             epoch (int) -- current epoch; used in the file name '%s_net_%s.pth' % (epoch, name)
         """
-        for name in self.model_names:
+        for name in self.model_names_for_save:
             if isinstance(name, str):
-                save_filename = '%s_net_%s.pth' % (epoch, name)
+                save_filename = 'iter_%s_net_%s.pth' % (epoch, name)
                 save_path = os.path.join(self.save_dir, save_filename)
                 net = getattr(self, 'net' + name)
 
                 if len(self.gpu_ids) > 0 and torch.cuda.is_available():
-                    torch.save(net.module.cpu().state_dict(), save_path)
+                    torch.save(pthutils.get_model(net).cpu().state_dict(), save_path)
                     net.cuda(self.gpu_ids[0])
                 else:
                     torch.save(net.cpu().state_dict(), save_path)
@@ -227,7 +249,7 @@ class BaseModel(ABC):
         Parameters:
             epoch (int) -- current epoch; used in the file name '%s_net_%s.pth' % (epoch, name)
         """
-        for name in self.model_names:
+        for name in self.model_names_for_save:
             if isinstance(name, str):
                 load_filename = '%s_net_%s.pth' % (epoch, name)
                 load_path = os.path.join(self.save_dir, load_filename)
@@ -238,8 +260,9 @@ class BaseModel(ABC):
                 # if you are using PyTorch newer than 0.4 (e.g., built from
                 # GitHub source), you can remove str() on self.device
                 state_dict = torch.load(load_path, map_location=str(self.device))
-                if hasattr(state_dict, '_metadata'):
-                    del state_dict._metadata
+                ## delete _metadata will not able to load spectral-norm layer
+                #if hasattr(state_dict, '_metadata'):
+                #    del state_dict._metadata
 
                 # patch InstanceNorm checkpoints prior to 0.4
                 for key in list(state_dict.keys()):  # need to copy keys here because we mutate in loop

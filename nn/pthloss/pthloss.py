@@ -4,6 +4,12 @@ from torch.nn import init
 import functools
 from collections import namedtuple
 import math
+from fastai import *
+from fastai.core import *
+from fastai.torch_core import *
+from fastai.callbacks  import hook_outputs
+import torchvision.models as models
+from ..pthnet import pthutils
 
 def l2_norm(input,axis=1):
     norm = torch.norm(input,2,axis,True)
@@ -233,3 +239,85 @@ def cal_gradient_penalty(netD, real_data, fake_data, device, type='mixed', const
         return gradient_penalty, gradients
     else:
         return 0.0, None
+
+# https://github.com/jantic/DeOldify/blob/master/fasterai/loss.py
+# FeatureLoss()
+class FeatureLoss_Vgg16(nn.Module):
+    def __init__(self, device, layer_wgts=[20,70,10]):
+        super().__init__()
+
+        self.m_feat = models.vgg16_bn(True).features.to(device).eval()
+        requires_grad(self.m_feat, False)
+        blocks = [i-1 for i,o in enumerate(children(self.m_feat)) if isinstance(o,nn.MaxPool2d)]
+        layer_ids = blocks[2:5]
+        self.loss_features = [self.m_feat[i] for i in layer_ids]
+        self.hooks = hook_outputs(self.loss_features, detach=False)
+        self.wgts = layer_wgts
+        self.metric_names = ['pixel',] + [f'feat_{i}' for i in range(len(layer_ids))] 
+        self.base_loss = F.l1_loss
+
+    def _make_features(self, x, clone=False):
+        self.m_feat(x)
+        return [(o.clone() if clone else o) for o in self.hooks.stored]
+
+    def forward(self, input, target):
+        out_feat = self._make_features(target, clone=True)
+        in_feat = self._make_features(input)
+        self.feat_losses = [self.base_loss(input,target)]
+        self.feat_losses += [self.base_loss(f_in, f_out)*w
+                             for f_in, f_out, w in zip(in_feat, out_feat, self.wgts)]
+        
+        self.metrics = dict(zip(self.metric_names, self.feat_losses))
+        return sum(self.feat_losses)
+    
+    def __del__(self): self.hooks.remove()
+
+
+class FeatureLoss_Resnet20(nn.Module):
+    def __init__(self, device, layer_wgts=[20,70,10], model_path='/Projects/mk_utils/Convert_Mxnet_to_Pytorch/Pytorch_NewModel.pth'):
+        super().__init__()
+
+        preModel = torch.load(model_path)
+        preModel = list(preModel.children())[0]
+        self.m_feat = pthutils.cut_model(preModel,-3).to(device).eval()
+        requires_grad(self.m_feat, False)
+        layer_ids = [5,10,17]
+        self.loss_features = [children(self.m_feat[5])[1][4], children(self.m_feat[10])[1][4], self.m_feat[17]]
+        self.hooks = hook_outputs(self.loss_features, detach=False)
+        self.wgts = layer_wgts
+        self.metric_names = ['pixel',] + [f'feat_{i}' for i in range(len(layer_ids))] 
+        self.base_loss = F.l1_loss
+
+    def _make_features(self, x, clone=False):
+        self.m_feat(x)
+        return [(o.clone() if clone else o) for o in self.hooks.stored]
+
+    def forward(self, input, target):
+        out_feat = self._make_features(target, clone=True)
+        in_feat = self._make_features(input)
+        self.feat_losses = [self.base_loss(input,target)]
+        self.feat_losses += [self.base_loss(f_in, f_out)*w
+                             for f_in, f_out, w in zip(in_feat, out_feat, self.wgts)]
+        
+        self.metrics = dict(zip(self.metric_names, self.feat_losses))
+        return sum(self.feat_losses)
+    
+    def __del__(self): self.hooks.remove()
+
+# https://github.com/fastai/fastai/blob/master/fastai/vision/gan.py
+# AdaptiveLoss()
+class AdaptiveLoss(nn.Module):
+    "Expand the `target` to match the `output` size before applying `crit`."
+    def __init__(self, crit):
+        super().__init__()
+        self.crit = crit
+
+    def forward(self, output, target):
+        return self.crit(output, target[:,None].expand_as(output).float())
+
+# https://github.com/fastai/fastai/blob/master/fastai/vision/gan.py
+# accuracy_thresh_expand()
+def accuracy_thresh_expand(y_pred:Tensor, y_true:Tensor, thresh:float=0.5, sigmoid:bool=True)->Rank0Tensor:
+    "Compute accuracy after expanding `y_true` to the size of `y_pred`."
+    if sigmoid: y_pred = y_pred.sigmoid()
+    return ((y_pred>thresh)==y_true[:,None].expand_as(y_pred).byte()).float().mean()

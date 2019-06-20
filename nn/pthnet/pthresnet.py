@@ -2,10 +2,8 @@ import torch
 import torch.nn as nn
 from torch.nn import init
 import functools
+from . import pthlayer
 
-class Flatten(nn.Module):
-    def forward(self, input):
-        return input.view(input.size(0), -1)
 
 class ResnetBlock_V2(nn.Module):
     """Define a Resnet block"""
@@ -269,7 +267,7 @@ class PthResNetSimple(nn.Module):
                         nn.Conv2d(self.filters[-1], self.filters[-1], kernel_size=3, stride=1, padding=1, bias=False),
                         nn.BatchNorm2d(self.filters[-1], eps=self.bnEps, momentum=self.bnMom, affine=True),
                         nn.ReLU(),
-                        Flatten(),
+                        pthlayer.Flatten(),
                         nn.Linear(self.filters[-1]*final_out_size*final_out_size, self.emb_size, bias=True),
                         nn.BatchNorm1d(self.emb_size, eps=self.bnEps, momentum=self.bnMom, affine=True)]
         self.model = nn.Sequential(*self.model)
