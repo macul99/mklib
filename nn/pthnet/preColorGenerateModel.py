@@ -121,10 +121,11 @@ class PreColorGenerateModel(BaseModel):
     def backward_G(self):
         """Calculate the loss for generators G_A and G_B"""
         self.loss_feature = self.featureLoss(self.fake_B, self.real_B)
-        self.loss_feature.backward()
 
         self.loss_pixel = self.pixelLoss(self.fake_B, self.real_B)
-        self.loss_pixel.backward()
+
+        self.loss_total = self.loss_feature*self.opt.LossCoef.feature + self.loss_pixel*self.opt.LossCoef.pixel
+        self.loss_total.backward()
         '''
         if self.opt.discrim_input_size == self.real_A.shape[-1]:
             self.loss_feature = self.featureLoss(self.fake_B, self.real_B)

@@ -50,7 +50,7 @@ class PreColorCriticModel(BaseModel):
         else:  # during test time, only load Gs
             self.model_names = ['Critic']
 
-        # define generator networks
+        # define discriminator networks
         self.netCritic = CriticModel(opt.ModelCritic).to(self.device)
         self.netCritic_layer_groups = [self.netCritic.encoder]
         self.netCritic_lr = [self.opt.ModelCritic.lr/10.]
@@ -153,19 +153,19 @@ class PreColorCriticModel(BaseModel):
     def backward_D(self):
         """Calculate the loss for generators G_A and G_B"""
         if self.opt.ModelCritic.discriminator_type in ['pair', 'both']:
-            self.loss_gan_pair = self.ganPairLoss(self.pred_fake_pair, torch.from_numpy(np.zeros(self.pred_fake_pair.shape[0])).to(self.device)) + \
-                                 self.ganPairLoss(self.pred_real_pair, torch.from_numpy(np.ones(self.pred_fake_pair.shape[0])).to(self.device))
+            self.loss_gan_pair = self.ganPairLoss(self.pred_fake_pair, self.pred_fake_pair.new_zeros(self.pred_fake_pair.shape[0])) + \
+                                 self.ganPairLoss(self.pred_real_pair, self.pred_real_pair.new_ones(self.pred_fake_pair.shape[0]))
 
         if self.opt.ModelCritic.discriminator_type in ['unpair', 'both']:
-            self.loss_gan_unpair = self.ganUnpairLoss(self.pred_fake_unpair, torch.from_numpy(np.zeros(self.pred_fake_unpair.shape[0])).to(self.device)) + \
-                                   self.ganUnpairLoss(self.pred_real_unpair, torch.from_numpy(np.ones(self.pred_fake_unpair.shape[0])).to(self.device))
+            self.loss_gan_unpair = self.ganUnpairLoss(self.pred_fake_unpair, self.pred_fake_unpair.new_zeros(self.pred_fake_unpair.shape[0])) + \
+                                   self.ganUnpairLoss(self.pred_real_unpair, self.pred_real_unpair.new_ones(self.pred_fake_unpair.shape[0]))
 
         if self.opt.ModelCritic.discriminator_type == 'pair':
-            self.loss_gan = self.loss_gan_pair
+            self.loss_gan = self.loss_gan_pair*self.opt.LossCoef.gan_pair_D
         elif self.opt.ModelCritic.discriminator_type == 'unpair':
-            self.loss_gan = self.loss_gan_unpair
+            self.loss_gan = self.loss_gan_unpair*self.opt.LossCoef.gan_unpair_D
         else: # both
-            self.loss_gan = self.loss_gan_pair + self.loss_gan_unpair
+            self.loss_gan = self.loss_gan_pair*self.opt.LossCoef.gan_pair_D + self.loss_gan_unpair*self.opt.LossCoef.gan_unpair_D
         self.loss_gan.backward()
         '''
         if self.opt.discrim_input_size == self.real_A.shape[-1]:

@@ -47,6 +47,15 @@ def set_requires_grad(nets, requires_grad=False):
             for param in net.parameters():
                 param.requires_grad = requires_grad
 
+# https://github.com/fastai/fastai/blob/4052f7adb441ab8a00eaa807b444a4e583b6bcc7/fastai/torch_core.py
+# requires_grad()
+def requires_grad(m:nn.Module, b:Optional[bool]=None)->Optional[bool]:
+    "If `b` is not set return `requires_grad` of first param, else set `requires_grad` on all params as `b`"
+    ps = list(m.parameters())
+    if not ps: return None
+    if b is None: return ps[0].requires_grad
+    for p in ps: p.requires_grad=b
+
 # https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/models/networks.py
 # Identity()
 class Identity(nn.Module):
@@ -394,6 +403,93 @@ class OneCycleScheduler(Callback):
     def on_epoch_end(self, epoch, **kwargs:Any)->None:
         "Tell Learner to stop if the cycle is finished."
         if epoch > self.tot_epochs: return {'stop_training': True}
+
+# https://github.com/fastai/fastai/blob/4052f7adb441ab8a00eaa807b444a4e583b6bcc7/fastai/vision/gan.py
+# GANTrainer()
+class GANTrainer():
+    "Handles GAN Training."
+    def __init__(self, generator, critic, opt_gen, opt_critic, switch_eval:bool=True, clip:float=None, beta:float=0.98, gen_first:bool=False,
+                 gen_thresh:float=None, crit_thresh:float=None, n_gen:int=None, n_crit:int=None):
+        self.generator,self.critic = generator, critic
+        self.opt_gen, self.opt_critic = opt_gen, opt_critic
+        self.switch_eval,self.clip,self.beta,self.gen_first = switch_eval,clip,beta,gen_first        
+        self.gen_thresh, self.crit_thresh = gen_thresh, crit_thresh # threshold for adaptive training switch
+        self.n_gen, self.n_crit = n_gen, n_crit # for fixed traiing switch        
+
+    def _set_trainable(self):
+        train_model = self.generator if     self.gen_mode else self.critic
+        loss_model  = self.generator if not self.gen_mode else self.critic
+        requires_grad(train_model, True)
+        requires_grad(loss_model, False)
+        if self.switch_eval:
+            train_model.train()
+            loss_model.eval()
+
+    def on_train_begin(self, gen_lr:float, gen_wd:float, crit_lr:float, crit_wd:float, **kwargs):
+        "Create the optimizers for the generator and critic if necessary, initialize smootheners."
+        self.opt_gen.lr,self.opt_gen.wd = gen_lr, gen_wd
+        self.opt_critic.lr,self.opt_critic.wd = crit_lr, crit_wd
+        self.gen_mode = self.gen_first
+        self.switch(self.gen_mode)
+        self.closses,self.glosses = [],[]
+        self.smoothenerG,self.smoothenerC = SmoothenValue(self.beta),SmoothenValue(self.beta)
+        self.n_g, self.n_c = 0, 0 # counter for fixed_switcher
+
+    def on_train_end(self, **kwargs):
+        "Switch in generator mode for showing results."
+        self.switch(gen_mode=True)
+
+    def on_batch_begin(self, **kwargs):
+        "Clamp the weights with `self.clip` if it's not None, return the correct input."
+        if self.clip is not None:
+            for p in self.critic.parameters(): p.data.clamp_(-self.clip, self.clip)
+
+    def on_batch_end(self, last_loss, **kwargs):
+        last_loss = last_loss.detach().cpu()
+
+        if self.gen_mode:
+            self.smoothenerG.add_value(last_loss)
+            self.glosses.append(self.smoothenerG.smooth)
+        else:
+            self.smoothenerC.add_value(last_loss)
+            self.closses.append(self.smoothenerC.smooth)
+
+        # do training switching
+        if self.gen_thresh is not None and self.gen_thresh is not None:
+            self.adaptive_switcher(last_loss)
+        elif self.n_gen is not None and self.n_crit is not None:
+            self.fixed_switcher()
+        else:
+            raise NotImplementedError("")
+       
+    def on_epoch_begin(self, **kwargs):
+        "Put the critic or the generator back to eval if necessary."
+        self.switch(self.gen_mode)
+
+    def on_epoch_end(self, **kwargs):
+        pass
+
+    def switch(self, gen_mode:bool=None):
+        "Switch the model, if `gen_mode` is provided, in the desired mode."
+        self.gen_mode = (not self.gen_mode) if gen_mode is None else gen_mode
+        self._set_trainable()
+
+    def adaptive_switcher(self, last_loss):
+        if self.gen_mode:
+            if last_loss < self.gen_thresh: self.switch()
+        else:
+            if last_loss < self.crit_thresh: self.switch()
+
+    def fixed_switcher(self):
+        if self.gen_mode:
+            self.n_g += 1
+            n_iter,n_in,n_out = self.n_gen,self.n_c,self.n_g
+        else:
+            self.n_c += 1
+            n_iter,n_in,n_out = self.n_crit,self.n_g,self.n_c
+        if n_iter == n_out:
+            self.switch()
+            self.n_c,self.n_g = 0,0
 
 # https://github.com/fastai/fastai/blob/master/fastai/callback.py
 # SmoothenValue()
