@@ -5,6 +5,7 @@ from . import pthutils
 from . import pthlayer
 import math
 import numpy as np
+import random
 
 
 # create convolution layer based discriminator
@@ -115,6 +116,65 @@ class CriticModel(nn.Module):
         pthutils.set_requires_grad(self.get_discriminator_pair(), True)
         pthutils.set_requires_grad(self.get_discriminator_unpair(), True)
 
+
+class CriticModel_FIW(nn.Module): # customized for Family_in_Wild Kaggle challenge
+    def __init__(self, opt):
+        super().__init__()
+        random.seed(100)
+        self.opt = opt
+        preModel = torch.load(opt.pretrainModel)
+        preModel = list(preModel.children())[0]
+        self.encoder = pthutils.cut_model(preModel,opt.ftExtractorCutNum)
+        imsize = (112,112)
+        sfs_szs = fastai.callbacks.hooks.model_sizes(self.encoder, size=imsize)
+        input_ch_num = sfs_szs[-1][1]
+
+        self.discriminator = create_conv_discriminator(input_ch_num*2, bnEps=opt.bn_eps, bnMom=opt.bn_mom) # for conditional gan
+        #fastai.torch_core.apply_init(self.model[2], nn.init.kaiming_normal_)
+
+    def forward(self, up_in:Tensor) -> Tensor:
+        assert type(up_in)==type([]) and len(up_in)==3 # up_in[0] and up_in[1] are related to each other, bub not related to up_in[2]
+        en1 = self.encoder(up_in[0])
+        en2 = self.encoder(up_in[1])
+        en3 = self.encoder(up_in[2])
+        if random.random() > 0.5:
+            en_pair = torch.cat((en1,en2),1)
+        else:
+            en_pair = torch.cat((en2,en1),1)
+
+        if random.random() > 0.5:
+            en_unpair1 = torch.cat((en1,en3),1)
+        else:
+            en_unpair1 = torch.cat((en3,en1),1)
+
+        if random.random() > 0.5:
+            en_unpair2 = torch.cat((en2,en3),1)
+        else:
+            en_unpair2 = torch.cat((en3,en2),1)
+        
+        fc1 = self.discriminator(en_pair)
+        fc2 = self.discriminator(en_unpair1)
+        fc3 = self.discriminator(en_unpair2)
+
+        return fc1, fc2, fc3 
+
+
+    def get_discriminator(self):
+        return self.discriminator
+
+    def freeze_encoder(self):
+        pthutils.set_requires_grad(self.get_encoder(), False)
+
+    def unfreeze_encoder(self):
+        pthutils.set_requires_grad(self.get_encoder(), True)
+
+    def freeze(self):
+        pthutils.set_requires_grad(self.get_encoder(), False)
+        pthutils.set_requires_grad(self.get_discriminator(), False)
+
+    def unfreeze(self):
+        pthutils.set_requires_grad(self.get_encoder(), True)
+        pthutils.set_requires_grad(self.get_discriminator(), True)
 
 '''
 class FeatureLoss(nn.Module):

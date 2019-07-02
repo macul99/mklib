@@ -10,11 +10,13 @@ from matplotlib import cm
 #from scipy import fftpack, ndimage
 from scipy.optimize import minimize
 from tfFaceDet import tfFaceDet
+from tfMtcnnFaceDet import tfMtcnnFaceDet
 import time
 import os
 from os.path import isdir
 from os import mkdir, listdir
 import argparse
+from spoofing_lbp.SpoofDspTf import SpoofDspTf
 import cv2
 from imutils import paths
 
@@ -60,7 +62,7 @@ def prepare_img(img, bbox, crop_scale_to_bbox=2.2, crop_square=False):
 
 ap = argparse.ArgumentParser()
 #ap.add_argument("-p", "--prefix", required=True, help="prefix of saved image name")
-ap.add_argument("-f", "--folder-path", required=True, help="input picture full path") # 
+ap.add_argument("-f", "--folder-path", required=True, help="input picture full path") # v can be a folder or a video file
 ap.add_argument("-o", "--output-path", required=True, help="output folder path")
 ap.add_argument("-sc", "--crop-scale", required=False, type=float, default=1.0, help="crop scale to bbox")
 ap.add_argument("-sz", "--min-size", required=False, type=int, default=100, help="threshold")
@@ -75,7 +77,12 @@ if not isdir(args['output_path']):
 square_flag = args['crop_square']>0
 crop_scale = args['crop_scale']
 
-faceDet = tfFaceDet()
+useMtcnn = True
+if useMtcnn:
+    faceDet = tfMtcnnFaceDet()
+else:
+    faceDet = tfFaceDet()
+
 #f_log = open('/home/macul/Projects/realsense/distance_face_size.log','wb')
 
 #cap = cv2.VideoCapture('/home/macul/test1.avi')
@@ -100,30 +107,53 @@ for imgp in imagePaths:
 
     # Create a pipeline object. This object configures the streaming camera and owns it's handle
     frame = cv2.imread(imgp)
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
     [h, w] = frame.shape[:2]
 
-    faces = faceDet.getModelOutput(frame_rgb)
-    for face in faces:
-        # face: [ymin, xmin, ymax, xmax]
-        f_h = int((face[2]-face[0])*h)
-        f_w = int((face[3]-face[1])*w)
-        
+    if useMtcnn:
+        faces = faceDet.getModelOutput(frame)
 
-        if f_h>min_size and f_w>min_size:
+        for face in faces:
+            # face: [ymin, xmin, ymax, xmax]
+            f_h = face[2]-face[0]
+            f_w = face[3]-face[1]
+
+            if f_h>min_size and f_w>min_size:
+                        
+                bbox = [face[1], face[0], face[3], face[2]]
+                print(face, bbox)
+
+                face_crop, bbox_new = prepare_img(frame, bbox, crop_scale_to_bbox=crop_scale, crop_square=square_flag)
+
+                cv2.imwrite(args['output_path']+'/{}_{}.png'.format(fname, counter), face_crop)
+                counter += 1
+
+                #cv2.imshow('frame',face_crop)
+                #if cv2.waitKey(1) & 0xFF == ord('q'):
+                #    break
+    else:
+
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        faces = faceDet.getModelOutput(frame_rgb)
+
+        for face in faces:
+            # face: [ymin, xmin, ymax, xmax]
+            f_h = int((face[2]-face[0])*h)
+            f_w = int((face[3]-face[1])*w)
             
-            bbox = [int(face[1]*w), int(face[0]*h), int(face[3]*w), int(face[2]*h)]
-            print(face, bbox)
 
-            face_crop, bbox_new = prepare_img(frame, bbox, crop_scale_to_bbox=crop_scale, crop_square=square_flag)
+            if f_h>min_size and f_w>min_size:
+                
+                bbox = [int(face[1]*w), int(face[0]*h), int(face[3]*w), int(face[2]*h)]
+                print(face, bbox)
 
-            cv2.imwrite(args['output_path']+'/{}_{}.jpg'.format(fname, counter), face_crop)
-            counter += 1
+                face_crop, bbox_new = prepare_img(frame, bbox, crop_scale_to_bbox=crop_scale, crop_square=square_flag)
 
-            #cv2.imshow('frame',face_crop)
-            #if cv2.waitKey(1) & 0xFF == ord('q'):
-            #    break
+                cv2.imwrite(args['output_path']+'/{}_{}.pgn'.format(fname, counter), face_crop)
+                counter += 1
+
+                #cv2.imshow('frame',face_crop)
+                #if cv2.waitKey(1) & 0xFF == ord('q'):
+                #    break
 
 #cv2.destroyAllWindows()
     #plt.subplot(122)
