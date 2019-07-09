@@ -117,26 +117,62 @@ class CriticModel(nn.Module):
         pthutils.set_requires_grad(self.get_discriminator_unpair(), True)
 
 
-class CriticModel_FIW(nn.Module): # customized for Family_in_Wild Kaggle challenge
-    def __init__(self, opt):
-        super().__init__()
+class CriticModel_FIW(fastai.layers.SequentialEx): # customized for Family_in_Wild Kaggle challenge
+    def __init__(self, opt):        
         random.seed(100)
         self.opt = opt
         preModel = torch.load(opt.pretrainModel)
         preModel = list(preModel.children())[0]
-        self.encoder = pthutils.cut_model(preModel,opt.ftExtractorCutNum)
+        encoder = pthutils.cut_model(preModel,opt.ftExtractorCutNum)
         imsize = (112,112)
-        sfs_szs = fastai.callbacks.hooks.model_sizes(self.encoder, size=imsize)
+        sfs_szs = fastai.callbacks.hooks.model_sizes(encoder, size=imsize)
         input_ch_num = sfs_szs[-1][1]
 
-        self.discriminator = create_conv_discriminator(input_ch_num*2, bnEps=opt.bn_eps, bnMom=opt.bn_mom) # for conditional gan
+        discriminator = create_conv_discriminator(input_ch_num*2, bnEps=opt.bn_eps, bnMom=opt.bn_mom) # for conditional gan
+        super().__init__(encoder, discriminator)
+        #self.encoder = self.layers[0]
+        #self.discriminator = self.layers[1]
         #fastai.torch_core.apply_init(self.model[2], nn.init.kaiming_normal_)
 
-    def forward(self, up_in:Tensor) -> Tensor:
+    def forward(self, up_in:Tensor, shuffle=True) -> Tensor:
         assert type(up_in)==type([]) and len(up_in)==3 # up_in[0] and up_in[1] are related to each other, bub not related to up_in[2]
-        en1 = self.encoder(up_in[0])
-        en2 = self.encoder(up_in[1])
-        en3 = self.encoder(up_in[2])
+        encoder = self.get_encoder()
+        discriminator = self.get_discriminator()
+        en1 = encoder(up_in[0])
+        en2 = encoder(up_in[1])
+        en3 = encoder(up_in[2])
+
+        if shuffle:
+            if random.random() > 0.5:
+                en_pair = torch.cat((en1,en2),1)
+                if random.random() > 0.5:
+                    en_unpair = torch.cat((en1,en3),1)
+                else:
+                    en_unpair = torch.cat((en3,en2),1)
+            else:
+                en_pair = torch.cat((en2,en1),1)
+                if random.random() > 0.5:
+                    en_unpair = torch.cat((en3,en1),1)
+                else:
+                    en_unpair = torch.cat((en2,en3),1)
+        else:
+            en_pair = torch.cat((en1,en2),1)
+            en_unpair = torch.cat((en1,en3),1)
+
+        
+        fc_p = discriminator(en_pair)
+        fc_u = discriminator(en_unpair)
+
+        return fc_p, fc_u
+
+    def forward_backup(self, up_in:Tensor) -> Tensor:
+        assert type(up_in)==type([]) and len(up_in)==3 # up_in[0] and up_in[1] are related to each other, bub not related to up_in[2]
+        encoder = self.get_encoder()
+        discriminator = self.get_discriminator()
+        en1 = encoder(up_in[0])
+        en2 = encoder(up_in[1])
+        en3 = encoder(up_in[2])
+
         if random.random() > 0.5:
             en_pair = torch.cat((en1,en2),1)
         else:
@@ -152,15 +188,17 @@ class CriticModel_FIW(nn.Module): # customized for Family_in_Wild Kaggle challen
         else:
             en_unpair2 = torch.cat((en3,en2),1)
         
-        fc1 = self.discriminator(en_pair)
-        fc2 = self.discriminator(en_unpair1)
-        fc3 = self.discriminator(en_unpair2)
+        fc1 = discriminator(en_pair)
+        fc2 = discriminator(en_unpair1)
+        fc3 = discriminator(en_unpair2)
 
         return fc1, fc2, fc3 
 
+    def get_encoder(self):
+        return self.layers[0]
 
     def get_discriminator(self):
-        return self.discriminator
+        return self.layers[1]
 
     def freeze_encoder(self):
         pthutils.set_requires_grad(self.get_encoder(), False)

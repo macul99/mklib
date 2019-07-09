@@ -12,6 +12,9 @@ import os
 from os import mkdir, makedirs, rename, listdir
 from os.path import join, exists, relpath, abspath
 import importlib
+import glob
+from collections import defaultdict
+import itertools
 from . import pthutils
 
 ##############################################################################
@@ -250,12 +253,12 @@ class PairedLabelDataset(BaseDataset):
     """
 
     def __init__(self, opt, seed=100):
+        random.seed(seed)
         BaseDataset.__init__(self, opt)
         if self.opt.dataset_name == 'oulu':
             self.__init_oulu()
         else:
-            raise NotImplementedError
-        random.seed(seed)
+            raise NotImplementedError        
 
         # apply the same transform to both A and B
         transform_params = get_params(self.opt, Image.open(self.A_path[0]).convert('RGB').size)
@@ -370,12 +373,12 @@ class UnpairedLabelDataset(BaseDataset):
     """
 
     def __init__(self, opt, seed=100):
+        random.seed(seed)
         BaseDataset.__init__(self, opt)
         if self.opt.dataset_name == 'casia':
             self.__init_casia()
         else:
-            raise NotImplementedError
-        random.seed(seed)
+            raise NotImplementedError        
 
         # apply the same transform to both A and B
         transform_params = get_params(self.opt, Image.open(self.A_path[0]).convert('RGB').size)
@@ -485,6 +488,168 @@ class UnpairedLabelDataset(BaseDataset):
         else:
             return x
 
+
+# FIW train dataset
+class PairedDataset_FIW(BaseDataset): # for family_in_wild kaggle challenge
+    """paired dataset with label
+    """
+    def __init__(self, opt, seed=100):
+        random.seed(seed)
+        BaseDataset.__init__(self, opt)
+        if self.opt.dataset_name == 'fiw':
+            self.__init_fiw()
+        else:
+            raise NotImplementedError
+
+        # apply the same transform to both A and B
+        transform_params = get_params(self.opt, Image.open(self.img_list[0]).convert('RGB').size)
+        self.transform = get_transform(self.opt, transform_params, grayscale=(self.input_nc == 1))
+
+    def __init_fiw(self):
+        self.pair_list, self.img_list, self.pair_combine = self.__prepare_fiw()
+
+        self.input_nc = 3
+        self.output_nc = 3     
+
+
+    def __prepare_fiw(self):
+        allPhotos = defaultdict(list)
+        for family in glob.glob(self.root+"train/*"):
+            for mem in glob.glob(family+'/*'):
+                for photo in glob.glob(mem+'/*'): # two folders contain 0 images
+                    allPhotos[mem].append(photo)
+
+        #list of all members with valid photo
+        ppl = list(allPhotos.keys())
+
+        data = pd.read_csv(self.root+'train_relationships.csv')
+        data.p1 = data.p1.apply( lambda x: self.root+'train/'+x )
+        data.p2 = data.p2.apply( lambda x: self.root+'train/'+x )
+        #print(data.shape)
+        #data.head()
+
+        data = data[ ( (data.p1.isin(ppl)) & (data.p2.isin(ppl)) ) ]
+        data = [ ( x[0], x[1]  ) for x in data.values ]
+        #len(data)
+
+
+        pair_combine = []
+        img_list = []
+        for trn in data:
+            #print(trn)
+            a = list(glob.glob(trn[0]+'/*.jpg'))
+            b = list(glob.glob(trn[1]+'/*.jpg'))
+            c = list(itertools.product(a, b))
+            img_list += a
+            img_list += b
+            pair_combine += c
+        img_list = list(set(img_list))
+
+        return data, img_list, pair_combine
+
+    def __getitem__(self, index):
+        """Return a data point and its metadata information.
+        Parameters:
+            index - - a random integer for data indexing
+        Returns a dictionary that contains A, B, A_paths and B_paths
+            A (tensor) - - an image in the input domain
+            B (tensor) - - its corresponding image in the target domain
+            A_paths (str) - - image paths
+            B_paths (str) - - image paths (same as A_paths)
+        """
+        # read a image given a random integer index
+        p1_path, p2_path = self.pair_combine[index]
+
+        p_pair = None
+        while p_pair is None or p_pair in self.pair_list or (p_pair[1], p_pair[0]) in self.pair_list:
+            u_path = random.choice(self.img_list)
+            p_pair = (p1_path[:p1_path.rfind('/')], u_path[:u_path.rfind('/')])
+
+        p1 = Image.open(p1_path).convert('RGB')
+        p2 = Image.open(p2_path).convert('RGB')
+        u = Image.open(u_path).convert('RGB')
+
+        # apply the same transform to both A and B
+
+        #transform_params = get_params(self.opt, A.size)
+        #A_transform = get_transform(self.opt, transform_params, grayscale=(self.input_nc == 1))
+        #transform_params = get_params(self.opt, B.size)
+        #B_transform = get_transform(self.opt, transform_params, grayscale=(self.output_nc == 1))
+
+        p1 = self.transform(p1)
+        p2 = self.transform(p2)
+        u = self.transform(u)
+
+        return {'P1': p1, 'P2': p2, 'U': u, 'P1_paths': p1_path, 'P2_paths': p2_path, 'U_paths': u_path}
+
+    def __len__(self):
+        """Return the total number of images in the dataset."""
+        return len(self.pair_combine)
+
+# FIW test ataset
+class TestDataset_FIW(BaseDataset): # for family_in_wild kaggle challenge
+    """paired dataset with label
+    """
+    def __init__(self, opt, seed=100):
+        random.seed(seed)
+        BaseDataset.__init__(self, opt)
+        if self.opt.dataset_name == 'fiw':
+            self.__init_fiw()
+        else:
+            raise NotImplementedError
+
+        # apply the same transform to both A and B
+        transform_params = get_params(self.opt, Image.open(self.pair_list[0][0]).convert('RGB').size)
+        self.transform = get_transform(self.opt, transform_params, grayscale=(self.input_nc == 1))
+
+    def __init_fiw(self):
+        self.pair_list = self.__prepare_fiw()
+
+        self.input_nc = 3
+        self.output_nc = 3
+
+
+    def __prepare_fiw(self):
+        data = pd.read_csv(self.root+'sample_submission.csv')
+        pair_list = []
+        for idx, row in data.iterrows():
+            p1, p2 = row.img_pair.split("-")
+            pair_list += [(self.root+"test/"+p1, self.root+"test/"+p2)]
+
+        return pair_list
+
+    def __getitem__(self, index):
+        """Return a data point and its metadata information.
+        Parameters:
+            index - - a random integer for data indexing
+        Returns a dictionary that contains A, B, A_paths and B_paths
+            A (tensor) - - an image in the input domain
+            B (tensor) - - its corresponding image in the target domain
+            A_paths (str) - - image paths
+            B_paths (str) - - image paths (same as A_paths)
+        """
+        # read a image given a random integer index
+        p1_path, p2_path = self.pair_list[index]
+
+        p1 = Image.open(p1_path).convert('RGB')
+        p2 = Image.open(p2_path).convert('RGB')
+
+        # apply the same transform to both A and B
+
+        #transform_params = get_params(self.opt, A.size)
+        #A_transform = get_transform(self.opt, transform_params, grayscale=(self.input_nc == 1))
+        #transform_params = get_params(self.opt, B.size)
+        #B_transform = get_transform(self.opt, transform_params, grayscale=(self.output_nc == 1))
+
+        p1 = self.transform(p1)
+        p2 = self.transform(p2)
+
+        return {'P1': p1, 'P2': p2, 'P1_paths': p1_path, 'P2_paths': p2_path, 'U': p1, 'U_paths': p1_path} # 'U' and 'U_paths' are for compatibility only
+
+    def __len__(self):
+        """Return the total number of images in the dataset."""
+        return len(self.pair_list)
+
 # For mixed dataset
 # For generated color images, the label is 0
 # For real color images, the label is 1
@@ -495,6 +660,7 @@ class MixedDataset(BaseDataset):
     """
 
     def __init__(self, opt, seed=100):
+        random.seed(seed)
         BaseDataset.__init__(self, opt)
         assert len(opt.dataroot) == len(opt.label)
         self.input_nc = 3
@@ -505,9 +671,7 @@ class MixedDataset(BaseDataset):
             assert len(tmp)>0
             self.A_path += tmp
             self.A_label += [opt.label[i]] * len(tmp)
-        self.A_size = len(self.A_path)
-
-        random.seed(seed)
+        self.A_size = len(self.A_path)        
 
         # apply the same transform to both A and B
         transform_params = get_params(self.opt, Image.open(self.A_path[0]).convert('RGB').size)
